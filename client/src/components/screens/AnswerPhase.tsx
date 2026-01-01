@@ -1,14 +1,15 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '../ui/Button';
 import { TextArea } from '../ui/Input';
 import { PlayerAvatar } from '../ui/PlayerAvatar';
 import { useGame } from '../../context/GameContext';
 
 export function AnswerPhase() {
-  const { room, playerId, currentQuestion, submitAnswer } = useGame();
+  const { room, playerId, currentQuestion, submitAnswer, leaveRoom } = useGame();
   const [answer, setAnswer] = useState('');
   const [submitted, setSubmitted] = useState(false);
+  const [showLeaveMenu, setShowLeaveMenu] = useState(false);
 
   if (!room || !currentQuestion) return null;
 
@@ -25,15 +26,54 @@ export function AnswerPhase() {
 
   return (
     <div className="min-h-[100dvh] flex flex-col p-6 bg-pattern">
-      {/* Round indicator */}
+      {/* Header with menu */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-center mb-4"
+        className="flex items-center justify-between mb-4"
       >
+        <div className="w-10" />
         <span className="inline-block px-4 py-1 bg-accent-purple/20 text-accent-purple rounded-full text-sm font-medium">
           Round {room.currentRound} of {room.totalRounds}
         </span>
+        <div className="relative">
+          <button
+            onClick={() => setShowLeaveMenu(!showLeaveMenu)}
+            className="w-10 h-10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+          >
+            ⋮
+          </button>
+          <AnimatePresence>
+            {showLeaveMenu && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowLeaveMenu(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -10 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -10 }}
+                  className="absolute right-0 top-full mt-2 z-50 bg-dark-700 border border-white/10 rounded-xl shadow-xl overflow-hidden min-w-[160px]"
+                >
+                  <button
+                    onClick={() => {
+                      setShowLeaveMenu(false);
+                      leaveRoom();
+                    }}
+                    className="w-full px-4 py-3 text-left text-sm text-white/70 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-2"
+                  >
+                    <span>🚪</span>
+                    Leave Game
+                  </button>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+        </div>
       </motion.div>
 
       {/* Question */}
