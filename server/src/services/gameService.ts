@@ -4,7 +4,10 @@ import { getRandomQuestion, formatQuestion } from '../data/questions';
 import { shuffleArray } from '../utils/generateCode';
 
 export async function startGame(roomCode: string, playerId: string): Promise<RoomDocument> {
-  const room = await RoomModel.findOne({ roomCode: roomCode.toUpperCase() });
+  const upperRoomCode = roomCode.toUpperCase();
+  
+  // First, get room to validate and prepare data
+  const room = await RoomModel.findOne({ roomCode: upperRoomCode });
   
   if (!room) {
     throw new Error('Room not found');
@@ -19,25 +22,12 @@ export async function startGame(roomCode: string, playerId: string): Promise<Roo
     throw new Error('Need at least 3 players to start');
   }
   
-  if (room.gameState !== 'waiting') {
-    throw new Error('Game has already started');
-  }
-  
-  // Set up the game
-  room.totalRounds = connectedPlayers.length;
-  room.currentRound = 1;
-  room.gameState = 'answering';
-  
-  // Shuffle players to randomize who gets questions
+  // Prepare game data
   const shuffledPlayers = shuffleArray(connectedPlayers);
-  
-  // Create first round
   const questionTemplate = getRandomQuestion(room.usedQuestions);
   if (!questionTemplate) {
     throw new Error('No questions available');
   }
-  
-  room.usedQuestions.push(questionTemplate);
   
   const targetPlayer = shuffledPlayers[0];
   const firstRound: Round = {
@@ -48,17 +38,49 @@ export async function startGame(roomCode: string, playerId: string): Promise<Roo
     votes: [],
   };
   
-  room.rounds.push(firstRound);
-  
-  // Reset player states
-  room.players.forEach(p => {
-    p.hasAnswered = false;
-    p.hasVoted = false;
-    p.isReady = false;
+  // Build player state resets
+  const playerResets: Record<string, boolean> = {};
+  room.players.forEach((_, idx) => {
+    playerResets[`players.${idx}.hasAnswered`] = false;
+    playerResets[`players.${idx}.hasVoted`] = false;
+    playerResets[`players.${idx}.isReady`] = false;
   });
   
-  await room.save();
-  return room;
+  // Atomically update only if game is still in 'waiting' state
+  const updatedRoom = await RoomModel.findOneAndUpdate(
+    {
+      roomCode: upperRoomCode,
+      hostId: playerId,
+      gameState: 'waiting', // Only update if still waiting - prevents race condition
+    },
+    {
+      $set: {
+        totalRounds: connectedPlayers.length,
+        currentRound: 1,
+        gameState: 'answering',
+        ...playerResets,
+      },
+      $push: {
+        usedQuestions: questionTemplate,
+        rounds: firstRound,
+      }
+    },
+    { new: true }
+  );
+  
+  if (!updatedRoom) {
+    // Re-check to give appropriate error message
+    const currentRoom = await RoomModel.findOne({ roomCode: upperRoomCode });
+    if (!currentRoom) {
+      throw new Error('Room not found');
+    }
+    if (currentRoom.gameState !== 'waiting') {
+      throw new Error('Game has already started');
+    }
+    throw new Error('Failed to start game');
+  }
+  
+  return updatedRoom;
 }
 
 export async function submitAnswer(
@@ -66,53 +88,92 @@ export async function submitAnswer(
   playerId: string, 
   answerText: string
 ): Promise<{ room: RoomDocument; allAnswered: boolean }> {
-  const room = await RoomModel.findOne({ roomCode: roomCode.toUpperCase() });
+  const upperRoomCode = roomCode.toUpperCase();
   
-  if (!room) {
-    throw new Error('Room not found');
-  }
-  
-  if (room.gameState !== 'answering') {
-    throw new Error('Not in answering phase');
-  }
-  
-  const player = room.players.find(p => p.id === playerId);
-  if (!player) {
+  // Find player index first
+  const playerIndex = await findPlayerIndex(upperRoomCode, playerId);
+  if (playerIndex === -1) {
     throw new Error('Player not found');
   }
   
-  if (player.hasAnswered) {
-    throw new Error('Already answered');
+  // Get player name for the answer
+  const roomCheck = await RoomModel.findOne({ roomCode: upperRoomCode });
+  if (!roomCheck) {
+    throw new Error('Room not found');
   }
+  const player = roomCheck.players[playerIndex];
   
-  const currentRound = room.rounds[room.currentRound - 1];
-  if (!currentRound) {
-    throw new Error('Round not found');
+  // Perform atomic update: add answer and mark player as answered
+  const updatedRoom = await RoomModel.findOneAndUpdate(
+    {
+      roomCode: upperRoomCode,
+      gameState: 'answering',
+      [`players.${playerIndex}.id`]: playerId,
+      [`players.${playerIndex}.hasAnswered`]: false,
+    },
+    {
+      $push: {
+        [`rounds.$[round].answers`]: {
+          playerId,
+          playerName: player.name,
+          text: answerText.trim(),
+        }
+      },
+      $set: {
+        [`players.${playerIndex}.hasAnswered`]: true,
+      }
+    },
+    {
+      new: true,
+      arrayFilters: [{ 'round.answers': { $exists: true } }],
+    }
+  );
+  
+  if (!updatedRoom) {
+    // Check why the update failed
+    const room = await RoomModel.findOne({ roomCode: upperRoomCode });
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.gameState !== 'answering') {
+      throw new Error('Not in answering phase');
+    }
+    const p = room.players.find(pl => pl.id === playerId);
+    if (!p) {
+      throw new Error('Player not found');
+    }
+    if (p.hasAnswered) {
+      throw new Error('Already answered');
+    }
+    throw new Error('Failed to submit answer');
   }
-  
-  // Add the answer
-  currentRound.answers.push({
-    playerId,
-    playerName: player.name,
-    text: answerText.trim(),
-  });
-  
-  player.hasAnswered = true;
   
   // Check if all connected players have answered
-  const connectedPlayers = room.players.filter(p => p.isConnected);
+  const connectedPlayers = updatedRoom.players.filter(p => p.isConnected);
   const allAnswered = connectedPlayers.every(p => p.hasAnswered);
   
   if (allAnswered) {
-    room.gameState = 'voting';
-    // Reset hasVoted for all players
-    room.players.forEach(p => {
-      p.hasVoted = false;
+    // Build atomic update to reset hasVoted and change state
+    const hasVotedResets: Record<string, boolean> = {};
+    updatedRoom.players.forEach((_, idx) => {
+      hasVotedResets[`players.${idx}.hasVoted`] = false;
     });
+    
+    const finalRoom = await RoomModel.findOneAndUpdate(
+      { roomCode: upperRoomCode, gameState: 'answering' },
+      {
+        $set: {
+          gameState: 'voting',
+          ...hasVotedResets,
+        }
+      },
+      { new: true }
+    );
+    
+    return { room: finalRoom || updatedRoom, allAnswered: true };
   }
   
-  await room.save();
-  return { room, allAnswered };
+  return { room: updatedRoom, allAnswered };
 }
 
 export async function submitVote(
@@ -120,122 +181,168 @@ export async function submitVote(
   playerId: string, 
   votedForPlayerId: string
 ): Promise<{ room: RoomDocument; allVoted: boolean }> {
-  const room = await RoomModel.findOne({ roomCode: roomCode.toUpperCase() });
+  const upperRoomCode = roomCode.toUpperCase();
   
-  if (!room) {
-    throw new Error('Room not found');
-  }
-  
-  if (room.gameState !== 'voting') {
-    throw new Error('Not in voting phase');
-  }
-  
-  const player = room.players.find(p => p.id === playerId);
-  if (!player) {
-    throw new Error('Player not found');
-  }
-  
-  if (player.hasVoted) {
-    throw new Error('Already voted');
-  }
-  
-  // Can't vote for own answer
+  // Validate: Can't vote for own answer
   if (playerId === votedForPlayerId) {
     throw new Error('Cannot vote for your own answer');
   }
   
-  const currentRound = room.rounds[room.currentRound - 1];
-  if (!currentRound) {
-    throw new Error('Round not found');
+  // Find player index
+  const playerIndex = await findPlayerIndex(upperRoomCode, playerId);
+  if (playerIndex === -1) {
+    throw new Error('Player not found');
   }
   
-  // Verify the voted answer exists
-  const votedAnswer = currentRound.answers.find(a => a.playerId === votedForPlayerId);
-  if (!votedAnswer) {
-    throw new Error('Invalid vote target');
+  // Perform atomic update: add vote and mark player as voted
+  const updatedRoom = await RoomModel.findOneAndUpdate(
+    {
+      roomCode: upperRoomCode,
+      gameState: 'voting',
+      [`players.${playerIndex}.id`]: playerId,
+      [`players.${playerIndex}.hasVoted`]: false,
+    },
+    {
+      $push: {
+        [`rounds.$[round].votes`]: {
+          oderId: playerId,
+          votedForPlayerId,
+        }
+      },
+      $set: {
+        [`players.${playerIndex}.hasVoted`]: true,
+      }
+    },
+    {
+      new: true,
+      arrayFilters: [{ 'round.votes': { $exists: true } }],
+    }
+  );
+  
+  if (!updatedRoom) {
+    // Could be: room not found, not voting phase, already voted, or player not found
+    const room = await RoomModel.findOne({ roomCode: upperRoomCode });
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.gameState !== 'voting') {
+      throw new Error('Not in voting phase');
+    }
+    const player = room.players.find(p => p.id === playerId);
+    if (!player) {
+      throw new Error('Player not found');
+    }
+    if (player.hasVoted) {
+      throw new Error('Already voted');
+    }
+    throw new Error('Failed to submit vote');
   }
-  
-  // Add the vote
-  currentRound.votes.push({
-    oderId: playerId,
-    votedForPlayerId,
-  });
-  
-  player.hasVoted = true;
   
   // Check if all connected players have voted
-  const connectedPlayers = room.players.filter(p => p.isConnected);
+  const connectedPlayers = updatedRoom.players.filter(p => p.isConnected);
   const allVoted = connectedPlayers.every(p => p.hasVoted);
   
   if (allVoted) {
-    // Calculate scores
+    // Calculate scores and transition to results - do this atomically too
+    const currentRound = updatedRoom.rounds[updatedRoom.currentRound - 1];
     const voteCount: Record<string, number> = {};
     currentRound.votes.forEach(v => {
       voteCount[v.votedForPlayerId] = (voteCount[v.votedForPlayerId] || 0) + 1;
     });
     
-    // Update scores
-    Object.entries(voteCount).forEach(([oderId, votes]) => {
-      const p = room.players.find(pl => pl.id === oderId);
-      if (p) {
-        p.score += votes;
+    // Build atomic update for scores
+    const scoreUpdates: Record<string, number> = {};
+    updatedRoom.players.forEach((p, idx) => {
+      if (voteCount[p.id]) {
+        scoreUpdates[`players.${idx}.score`] = p.score + voteCount[p.id];
       }
     });
     
-    room.gameState = 'results';
+    const finalRoom = await RoomModel.findOneAndUpdate(
+      { roomCode: upperRoomCode, gameState: 'voting' },
+      {
+        $set: {
+          gameState: 'results',
+          ...scoreUpdates,
+        }
+      },
+      { new: true }
+    );
+    
+    return { room: finalRoom || updatedRoom, allVoted: true };
   }
   
-  await room.save();
-  return { room, allVoted };
+  return { room: updatedRoom, allVoted };
+}
+
+// Helper function to find player index
+async function findPlayerIndex(roomCode: string, playerId: string): Promise<number> {
+  const room = await RoomModel.findOne({ roomCode });
+  if (!room) return -1;
+  return room.players.findIndex(p => p.id === playerId);
 }
 
 export async function markReady(
   roomCode: string, 
   playerId: string
 ): Promise<{ room: RoomDocument; allReady: boolean; gameOver: boolean }> {
-  const room = await RoomModel.findOne({ roomCode: roomCode.toUpperCase() });
+  const upperRoomCode = roomCode.toUpperCase();
   
-  if (!room) {
-    throw new Error('Room not found');
-  }
-  
-  if (room.gameState !== 'results') {
-    throw new Error('Not in results phase');
-  }
-  
-  const player = room.players.find(p => p.id === playerId);
-  if (!player) {
+  // Find player index
+  const playerIndex = await findPlayerIndex(upperRoomCode, playerId);
+  if (playerIndex === -1) {
     throw new Error('Player not found');
   }
   
-  player.isReady = true;
+  // Atomically mark player as ready
+  const updatedRoom = await RoomModel.findOneAndUpdate(
+    {
+      roomCode: upperRoomCode,
+      gameState: 'results',
+      [`players.${playerIndex}.id`]: playerId,
+    },
+    {
+      $set: {
+        [`players.${playerIndex}.isReady`]: true,
+      }
+    },
+    { new: true }
+  );
+  
+  if (!updatedRoom) {
+    const room = await RoomModel.findOne({ roomCode: upperRoomCode });
+    if (!room) {
+      throw new Error('Room not found');
+    }
+    if (room.gameState !== 'results') {
+      throw new Error('Not in results phase');
+    }
+    throw new Error('Failed to mark ready');
+  }
   
   // Check if all connected players are ready
-  const connectedPlayers = room.players.filter(p => p.isConnected);
+  const connectedPlayers = updatedRoom.players.filter(p => p.isConnected);
   const allReady = connectedPlayers.every(p => p.isReady);
   
   let gameOver = false;
   
   if (allReady) {
     // Check if game is over
-    if (room.currentRound >= room.totalRounds) {
-      room.gameState = 'finished';
-      gameOver = true;
+    if (updatedRoom.currentRound >= updatedRoom.totalRounds) {
+      const finalRoom = await RoomModel.findOneAndUpdate(
+        { roomCode: upperRoomCode, gameState: 'results' },
+        { $set: { gameState: 'finished' } },
+        { new: true }
+      );
+      return { room: finalRoom || updatedRoom, allReady: true, gameOver: true };
     } else {
-      // Start next round
-      room.currentRound += 1;
-      room.gameState = 'answering';
-      
-      // Get next question and target player
-      const questionTemplate = getRandomQuestion(room.usedQuestions);
+      // Start next round - prepare data
+      const questionTemplate = getRandomQuestion(updatedRoom.usedQuestions);
       if (!questionTemplate) {
         throw new Error('No questions available');
       }
       
-      room.usedQuestions.push(questionTemplate);
-      
-      // Get player who hasn't been target yet
-      const targetedIds = room.rounds.map(r => r.targetPlayerId);
+      const targetedIds = updatedRoom.rounds.map(r => r.targetPlayerId);
       const availablePlayers = connectedPlayers.filter(p => !targetedIds.includes(p.id));
       const targetPlayer = availablePlayers.length > 0 
         ? availablePlayers[Math.floor(Math.random() * availablePlayers.length)]
@@ -249,19 +356,35 @@ export async function markReady(
         votes: [],
       };
       
-      room.rounds.push(newRound);
-      
-      // Reset player states
-      room.players.forEach(p => {
-        p.hasAnswered = false;
-        p.hasVoted = false;
-        p.isReady = false;
+      // Build player state resets
+      const playerResets: Record<string, boolean> = {};
+      updatedRoom.players.forEach((_, idx) => {
+        playerResets[`players.${idx}.hasAnswered`] = false;
+        playerResets[`players.${idx}.hasVoted`] = false;
+        playerResets[`players.${idx}.isReady`] = false;
       });
+      
+      const finalRoom = await RoomModel.findOneAndUpdate(
+        { roomCode: upperRoomCode, gameState: 'results' },
+        {
+          $inc: { currentRound: 1 },
+          $set: {
+            gameState: 'answering',
+            ...playerResets,
+          },
+          $push: {
+            usedQuestions: questionTemplate,
+            rounds: newRound,
+          }
+        },
+        { new: true }
+      );
+      
+      return { room: finalRoom || updatedRoom, allReady: true, gameOver: false };
     }
   }
   
-  await room.save();
-  return { room, allReady, gameOver };
+  return { room: updatedRoom, allReady, gameOver };
 }
 
 export function getRoundResults(room: RoomDocument): RoundResult[] {
