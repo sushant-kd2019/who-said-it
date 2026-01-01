@@ -1,6 +1,6 @@
 import { RoomModel, RoomDocument } from '../models/Room';
 import { Round, RoundResult } from '../types';
-import { getRandomQuestion, formatQuestion } from '../data/questions';
+import { getRandomQuestion, formatQuestion } from './questionService';
 import { shuffleArray } from '../utils/generateCode';
 
 export async function startGame(roomCode: string, playerId: string): Promise<RoomDocument> {
@@ -24,7 +24,7 @@ export async function startGame(roomCode: string, playerId: string): Promise<Roo
   
   // Prepare game data
   const shuffledPlayers = shuffleArray(connectedPlayers);
-  const questionTemplate = getRandomQuestion(room.usedQuestions);
+  const questionTemplate = await getRandomQuestion(room.usedQuestions);
   if (!questionTemplate) {
     throw new Error('No questions available');
   }
@@ -337,7 +337,7 @@ export async function markReady(
       return { room: finalRoom || updatedRoom, allReady: true, gameOver: true };
     } else {
       // Start next round - prepare data
-      const questionTemplate = getRandomQuestion(updatedRoom.usedQuestions);
+      const questionTemplate = await getRandomQuestion(updatedRoom.usedQuestions);
       if (!questionTemplate) {
         throw new Error('No questions available');
       }
