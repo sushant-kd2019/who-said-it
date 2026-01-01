@@ -19,7 +19,7 @@ A real-time multiplayer party game where players answer creative questions about
 - **Frontend:** React + TypeScript + Vite + Tailwind CSS
 - **Backend:** Node.js + Express + Socket.IO
 - **Database:** MongoDB
-- **Deployment:** Cloudflare Pages (frontend) + Railway (backend)
+- **Deployment:** Cloudflare Pages (frontend) + Render (backend)
 
 ## 📁 Project Structure
 
@@ -78,23 +78,34 @@ npm run build:client
 
 ## 🌐 Deployment
 
-### Backend (Railway)
+### Backend (Render)
 
-1. Connect your GitHub repo to Railway
-2. Set root directory to `server`
-3. Add environment variables:
-   - `MONGODB_URI`
-   - `CLIENT_URL=https://whosaidit.lecorvus.com`
-   - `NODE_ENV=production`
+1. Go to [render.com](https://render.com) and sign in with GitHub
+2. Click **New** → **Web Service** → Select this repo
+3. Configure:
+   - **Root Directory:** `server`
+   - **Build Command:** `npm install && npm run build`
+   - **Start Command:** `npm start`
+4. Add environment variables:
+   - `MONGODB_URI` - Your MongoDB Atlas connection string
+   - `CLIENT_URL` - `https://whosaidit.lecorvus.com` (or your frontend URL)
+   - `NODE_ENV` - `production`
+5. Deploy and copy your Render URL (e.g., `https://whosaidit-server.onrender.com`)
+
+> **Note:** Free tier sleeps after 15 min of inactivity (~50s cold start on first request)
 
 ### Frontend (Cloudflare Pages)
 
-1. Connect your GitHub repo to Cloudflare Pages
-2. Set root directory to `client`
-3. Build command: `npm run build`
-4. Output directory: `dist`
-5. Add environment variable:
-   - `VITE_SOCKET_URL=https://your-railway-app.railway.app`
+1. Go to [dash.cloudflare.com](https://dash.cloudflare.com) → **Workers & Pages** → **Create**
+2. Connect your GitHub repo
+3. Configure:
+   - **Root Directory:** `client`
+   - **Build Command:** `npm run build`
+   - **Output Directory:** `dist`
+4. Add environment variables:
+   - `VITE_API_URL` - Your Render backend URL
+   - `VITE_SOCKET_URL` - Your Render backend URL (same as above)
+5. Deploy!
 
 ## 📝 License
 
