@@ -1,0 +1,155 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-primary: #0a0a12;
+  --bg-secondary: #0f0f1a;
+  --bg-card: #1a1a2e;
+  --accent-pink: #ff6b9d;
+  --accent-purple: #c44dff;
+  --accent-cyan: #4dffdb;
+  --accent-yellow: #ffd93d;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Nunito', sans-serif;
+  background: var(--bg-primary);
+  color: white;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--accent-purple);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-pink);
+}
+
+/* Focus styles for accessibility */
+*:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Disable text selection on game elements */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Background pattern */
+.bg-pattern {
+  background-image: 
+    radial-gradient(circle at 20% 50%, rgba(196, 77, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 107, 157, 0.08) 0%, transparent 50%),
+    radial-gradient(circle at 40% 80%, rgba(77, 255, 219, 0.05) 0%, transparent 50%);
+}
+
+/* Glowing text effect */
+.text-glow {
+  text-shadow: 0 0 20px rgba(196, 77, 255, 0.5);
+}
+
+/* Card glass effect */
+.glass {
+  background: rgba(26, 26, 46, 0.8);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Gradient border */
+.gradient-border {
+  position: relative;
+  background: var(--bg-card);
+  border-radius: 16px;
+}
+
+.gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple), var(--accent-cyan));
+  border-radius: 18px;
+  z-index: -1;
+  opacity: 0.5;
+}
+
+/* Button press effect */
+.btn-press:active {
+  transform: scale(0.95);
+}
+
+/* Safe area padding for mobile */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Animations */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* Input styles */
+input, textarea {
+  font-family: 'Nunito', sans-serif;
+}
+
+input::placeholder, textarea::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Prevent zoom on mobile inputs */
+@media screen and (max-width: 768px) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+

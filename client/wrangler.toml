@@ -1,0 +1,10 @@
+# Cloudflare Pages configuration
+name = "whosaidit"
+compatibility_date = "2024-01-01"
+
+# Note: This file is optional for Cloudflare Pages
+# Main configuration is done via the Cloudflare Dashboard
+
+[site]
+bucket = "./dist"
+
