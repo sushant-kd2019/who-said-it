@@ -7,6 +7,8 @@ import dotenv from 'dotenv';
 
 import roomRoutes from './routes/roomRoutes';
 import { setupGameHandlers } from './socket/gameHandlers';
+import { seedQuestions, getQuestionCount } from './services/questionService';
+import { questionTemplates } from './data/seedQuestions';
 
 // Load environment variables
 dotenv.config();
@@ -60,12 +62,27 @@ app.get('/', (_, res) => {
   });
 });
 
+// Seed questions if needed
+async function initializeQuestions() {
+  const count = await getQuestionCount();
+  if (count === 0) {
+    console.log('No questions found in database. Seeding questions...');
+    const insertedCount = await seedQuestions(questionTemplates);
+    console.log(`Seeded ${insertedCount} questions into the database`);
+  } else {
+    console.log(`Found ${count} questions in database`);
+  }
+}
+
 // Connect to MongoDB and start server
 async function startServer() {
   try {
     console.log('Connecting to MongoDB...');
     await mongoose.connect(MONGODB_URI);
     console.log('Connected to MongoDB');
+
+    // Initialize questions
+    await initializeQuestions();
 
     httpServer.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);

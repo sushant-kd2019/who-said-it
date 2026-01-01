@@ -10,6 +10,7 @@ export interface RoomDocument extends Document {
   totalRounds: number;
   rounds: Round[];
   usedQuestions: string[];
+  questionPool: string[]; // Pre-fetched questions for the game
   createdAt: Date;
   updatedAt: Date;
 }
@@ -57,6 +58,7 @@ const RoomSchema = new Schema<RoomDocument>({
   totalRounds: { type: Number, default: 0 },
   rounds: [RoundSchema],
   usedQuestions: [{ type: String }],
+  questionPool: [{ type: String }],
 }, { 
   timestamps: true,
   toJSON: {
