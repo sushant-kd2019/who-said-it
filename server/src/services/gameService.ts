@@ -1,6 +1,6 @@
 import { RoomModel, RoomDocument } from '../models/Room';
 import { Round, RoundResult } from '../types';
-import { getRandomQuestion, formatQuestion } from './questionService';
+import { getQuestions, formatQuestion, incrementQuestionUsage } from './questionService';
 import { shuffleArray } from '../utils/generateCode';
 
 export async function startGame(roomCode: string, playerId: string): Promise<RoomDocument> {
@@ -24,14 +24,17 @@ export async function startGame(roomCode: string, playerId: string): Promise<Roo
   
   // Prepare game data
   const shuffledPlayers = shuffleArray(connectedPlayers);
-  const questionTemplate = await getRandomQuestion(room.usedQuestions);
-  if (!questionTemplate) {
-    throw new Error('No questions available');
+  const totalRounds = connectedPlayers.length;
+  
+  // Fetch all questions needed for the entire game (1 query)
+  const questionPool = await getQuestions(totalRounds);
+  if (questionPool.length < totalRounds) {
+    throw new Error('Not enough questions available');
   }
   
   const targetPlayer = shuffledPlayers[0];
   const firstRound: Round = {
-    questionTemplate,
+    questionTemplate: questionPool[0],
     targetPlayerName: targetPlayer.name,
     targetPlayerId: targetPlayer.id,
     answers: [],
@@ -55,13 +58,14 @@ export async function startGame(roomCode: string, playerId: string): Promise<Roo
     },
     {
       $set: {
-        totalRounds: connectedPlayers.length,
+        totalRounds,
         currentRound: 1,
         gameState: 'answering',
+        questionPool, // Store all questions for the game
+        usedQuestions: [questionPool[0]], // Track first question as used
         ...playerResets,
       },
       $push: {
-        usedQuestions: questionTemplate,
         rounds: firstRound,
       }
     },
@@ -334,12 +338,20 @@ export async function markReady(
         { $set: { gameState: 'finished' } },
         { new: true }
       );
+      
+      // Increment usage count for all questions used in this game
+      const usedQuestions = updatedRoom.usedQuestions || [];
+      if (usedQuestions.length > 0) {
+        await incrementQuestionUsage(usedQuestions);
+      }
+      
       return { room: finalRoom || updatedRoom, allReady: true, gameOver: true };
     } else {
-      // Start next round - prepare data
-      const questionTemplate = await getRandomQuestion(updatedRoom.usedQuestions);
+      // Start next round - get question from pre-fetched pool
+      const nextQuestionIndex = updatedRoom.currentRound; // currentRound is 1-indexed, so this gets the next one
+      const questionTemplate = updatedRoom.questionPool[nextQuestionIndex];
       if (!questionTemplate) {
-        throw new Error('No questions available');
+        throw new Error('No questions available in pool');
       }
       
       const targetedIds = updatedRoom.rounds.map(r => r.targetPlayerId);
@@ -443,6 +455,7 @@ export async function resetGame(roomCode: string): Promise<RoomDocument | null> 
   room.totalRounds = 0;
   room.rounds = [];
   room.usedQuestions = [];
+  room.questionPool = [];
   
   room.players.forEach(p => {
     p.score = 0;
