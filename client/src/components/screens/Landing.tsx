@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
+import { ChangelogModal } from '../ui/ChangelogModal';
 import { useGame } from '../../context/GameContext';
 
 export function Landing() {
   const { setPlayerName, isConnected } = useGame();
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [showChangelog, setShowChangelog] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,6 +100,21 @@ export function Landing() {
           {isConnected ? 'Connected' : 'Connecting to server...'}
         </span>
       </motion.div>
+
+      {/* Version badge */}
+      <motion.button
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.6 }}
+        onClick={() => setShowChangelog(true)}
+        className="mt-6 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-xs text-white/50 hover:text-white/70 transition-all flex items-center gap-2"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-accent-cyan animate-pulse" />
+        v1.1.0 • Jan 9, 2026
+      </motion.button>
+
+      {/* Changelog Modal */}
+      <ChangelogModal isOpen={showChangelog} onClose={() => setShowChangelog(false)} />
     </div>
   );
 }
