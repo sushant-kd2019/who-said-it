@@ -42,6 +42,45 @@ export function setupGameHandlers(io: Server) {
           currentQuestion: gameService.getCurrentQuestion(room),
         });
         
+        // Send additional state data based on current game phase
+        const player = room.players.find(p => p.id === playerId);
+        
+        // Voting phase: send shuffled answers if player hasn't voted
+        if (room.gameState === 'voting' && player && !player.hasVoted) {
+          const answers = gameService.getShuffledAnswers(room, playerId);
+          socket.emit('voting-phase', {
+            room: roomResponse,
+            answers,
+          });
+        }
+        
+        // Results phase: send round results
+        if (room.gameState === 'results') {
+          const results = gameService.getRoundResults(room);
+          socket.emit('round-results', {
+            room: roomResponse,
+            results,
+          });
+        }
+        
+        // Finished phase: send final scores and winner
+        if (room.gameState === 'finished') {
+          const finalScores = [...room.players]
+            .sort((a, b) => b.score - a.score)
+            .map((p, index) => ({
+              rank: index + 1,
+              playerId: p.id,
+              playerName: p.name,
+              score: p.score,
+            }));
+          
+          socket.emit('game-over', {
+            room: roomResponse,
+            finalScores,
+            winner: finalScores[0],
+          });
+        }
+        
         // Notify others
         socket.to(roomCode.toUpperCase()).emit('player-joined', {
           player: room.players.find(p => p.id === playerId),
